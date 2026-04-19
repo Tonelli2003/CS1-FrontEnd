@@ -1,4 +1,4 @@
-# Ambiente virtual Python
+# Ambientes virtuais
 .venv/
 venv/
 env/
@@ -7,14 +7,37 @@ env/
 __pycache__/
 *.py[cod]
 *.pyo
+*.pyd
+.Python
 
-# Streamlit cache local
+# Variáveis de ambiente
+.env
+.env.*
+
+# Streamlit
 .streamlit/secrets.toml
+
+# Distribuição / empacotamento
+dist/
+build/
+*.egg-info/
+*.egg
+
+# pytest / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Jupyter
+.ipynb_checkpoints/
 
 # IDEs
 .vscode/
 .idea/
+*.swp
+*.swo
 
-# OS
+# Sistema operacional
 .DS_Store
 Thumbs.db
+desktop.ini
