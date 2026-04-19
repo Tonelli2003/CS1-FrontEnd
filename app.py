@@ -15,9 +15,22 @@ Decisão de arquitetura:
 """
 
 import datetime
+import traceback
 import streamlit as st
 
-from backend.mock_db import init_db
+# Import guard: pandas/numpy podem falhar por política de DLL no Windows.
+# O bloco try/except isola o crash no shell, permitindo que o CSS de
+# sanitização e a sidebar renderizem antes de qualquer mensagem de erro.
+_backend_ok = True
+_backend_error: Exception | None = None
+_backend_traceback: str = ""
+
+try:
+    from backend.mock_db import init_db
+except Exception as _exc:
+    _backend_ok = False
+    _backend_error = _exc
+    _backend_traceback = traceback.format_exc()
 
 # ── 1. Configuração da Página ────────────────────────────────────────────────
 st.set_page_config(
@@ -37,7 +50,8 @@ st.set_page_config(
 # o Streamlit não garante a ordem de execução das páginas em caso de
 # navegação direta via URL. Centralizando aqui, toda sessão tem estado
 # válido antes que qualquer rota seja resolvida.
-init_db()
+if _backend_ok:
+    init_db()
 
 # ── 2.1 Sanitização do Framework ─────────────────────────────────────────────
 # Remove elementos nativos do Streamlit que expõem o framework ao usuário
@@ -47,25 +61,32 @@ init_db()
 st.markdown(
     """
     <style>
-    /* Header fixo superior (contém o ícone de loading e o menu) */
-    [data-testid="stHeader"] {
-        display: none !important;
-    }
+    /* Header fixo superior */
+    [data-testid="stHeader"] { display: none !important; }
 
     /* Rodapé "Made with Streamlit" */
-    [data-testid="stBottom"],
-    footer {
-        display: none !important;
-    }
+    [data-testid="stBottom"], footer { display: none !important; }
 
     /* Menu hambúrguer superior direito */
-    #MainMenu {
-        display: none !important;
+    #MainMenu { display: none !important; }
+
+    /* Título nativo "app" no topo da sidebar gerado pelo Streamlit */
+    [data-testid="stSidebarHeader"] { display: none !important; }
+
+    /* Compensa o espaço do header removido */
+    .block-container { padding-top: 1.5rem !important; }
+
+    /* Divider sutil entre sidebar e área de conteúdo */
+    [data-testid="stSidebar"] {
+        border-right: 1px solid rgba(124, 58, 237, 0.25) !important;
     }
 
-    /* Compensa o espaço do header removido para evitar gap no topo */
-    .block-container {
-        padding-top: 1.5rem !important;
+    /* Espaçamento aumentado nos itens de navegação (st.page_link) */
+    [data-testid="stSidebarNav"] a,
+    [data-testid="stSidebarContent"] a {
+        padding-top: 10px !important;
+        padding-bottom: 10px !important;
+        display: block !important;
     }
     </style>
     """,
@@ -77,16 +98,15 @@ st.markdown(
 st.markdown(
     """
     <style>
-    /* --- Sidebar --- */
+    /* --- Sidebar Dark Tech --- */
     [data-testid="stSidebar"] {
-        background-color: #0D3B8E;          /* Azul profundo — âncora visual */
-        border-right: 1px solid #1A4FAD;
+        background-color: #18181B;
     }
     [data-testid="stSidebar"] * {
-        color: #E8F0FE !important;          /* Texto claro sobre fundo escuro */
+        color: #E4E4E7 !important;
     }
     [data-testid="stSidebar"] hr {
-        border-color: #1A4FAD;
+        border-color: rgba(124,58,237,0.3);
     }
 
     /* --- Bloco de Logo --- */
@@ -203,16 +223,16 @@ st.markdown(
 # em cada arquivo de /pages.
 with st.sidebar:
 
-    # 4.1  Logo / Identidade Visual
+    # 4.1  Identidade Visual — substitui o título nativo "app" do Streamlit
     st.markdown(
         """
         <div class="logo-block">
-            <div class="logo-title">Bitech</div>
-            <div class="logo-subtitle">Asset Management Platform</div>
+            <div class="logo-title">BITECH</div>
+            <div class="logo-subtitle">Gestão de Ativos · Sprint 1</div>
         </div>
         """,
         unsafe_allow_html=True,
-    )
+)
 
     st.markdown("---")
 
@@ -267,7 +287,51 @@ with st.sidebar:
     st.caption("🔗 Backend: Mock (FastAPI em breve)")
 
 
-# ── 5. Corpo Principal — Landing Page ────────────────────────────────────────
+# ── 5. Contenção de Erros de Backend ────────────────────────────────────────
+# Exibido antes do corpo principal para que o utilizador de negócio
+# veja uma mensagem limpa; o traceback técnico fica contido no expander.
+if not _backend_ok:
+    st.markdown(
+        """
+        <div style="
+            background: rgba(239,68,68,0.08);
+            border: 1px solid rgba(239,68,68,0.3);
+            border-left: 4px solid #EF4444;
+            border-radius: 8px;
+            padding: 14px 20px;
+            margin-bottom: 20px;
+        ">
+            <div style="font-weight:700; color:#FCA5A5; font-size:14px;">
+                ⚠️ Não foi possível carregar os módulos técnicos da plataforma
+            </div>
+            <div style="color:#FCA5A5; font-size:12px; margin-top:4px;">
+                O serviço de dados está indisponível nesta sessão.
+                Verifique o ambiente de execução e reinicie a aplicação.
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    with st.expander("🔧 Exibir Detalhes Técnicos do Erro", expanded=False):
+        st.code(_backend_traceback, language="python")
+    st.stop()
+
+# ── 6. Corpo Principal — Landing Page ────────────────────────────────────────
+
+# Título de página com divisor visual
+st.markdown(
+    """
+    <div style="margin-bottom: 4px;">
+        <span style="font-size:11px; letter-spacing:3px; text-transform:uppercase;
+                     color:#7C3AED; font-weight:600;">Bitech · Challenge Sprint 1</span>
+        <h1 style="font-size:26px; font-weight:800; margin:4px 0 0 0; color:#E4E4E7;">
+            Plataforma de Gestão de Ativos
+        </h1>
+    </div>
+    <hr style="border:none; border-top:1px solid rgba(124,58,237,0.25); margin:12px 0 24px 0;">
+    """,
+    unsafe_allow_html=True,
+)
 
 # Hero
 st.markdown(

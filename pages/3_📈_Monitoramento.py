@@ -16,12 +16,23 @@ Decisões de arquitetura:
 """
 
 import datetime
+import traceback
 
-import numpy as np
-import pandas as pd
 import streamlit as st
 
-from backend.mock_db import init_db, get_equipamentos
+# Import guard: numpy e pandas podem falhar por política de DLL no Windows.
+# O set_page_config e o bloco de erro são renderizados antes de st.stop()
+# para que a página exiba uma mensagem limpa mesmo sem o backend disponível.
+_deps_ok = True
+_deps_traceback = ""
+
+try:
+    import numpy as np
+    import pandas as pd
+    from backend.mock_db import init_db, get_equipamentos
+except Exception as _exc:
+    _deps_ok = False
+    _deps_traceback = traceback.format_exc()
 
 # ── Configuração da página ────────────────────────────────────────────────────
 st.set_page_config(
@@ -31,7 +42,35 @@ st.set_page_config(
 )
 
 # ── Inicialização do banco ────────────────────────────────────────────────────
-init_db()
+if _deps_ok:
+    init_db()
+
+# ── Contenção de Erros ────────────────────────────────────────────────────────
+if not _deps_ok:
+    st.markdown(
+        """
+        <div style="
+            background: rgba(239,68,68,0.08);
+            border: 1px solid rgba(239,68,68,0.3);
+            border-left: 4px solid #EF4444;
+            border-radius: 8px;
+            padding: 14px 20px;
+            margin-bottom: 20px;
+        ">
+            <div style="font-weight:700; color:#FCA5A5; font-size:14px;">
+                ⚠️ Não foi possível carregar os módulos técnicos de telemetria
+            </div>
+            <div style="color:#FCA5A5; font-size:12px; margin-top:4px;">
+                Os componentes de aquisição de dados estão indisponíveis nesta sessão.
+                Verifique as dependências do ambiente e reinicie a aplicação.
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    with st.expander("🔧 Exibir Detalhes Técnicos do Erro", expanded=False):
+        st.code(_deps_traceback, language="python")
+    st.stop()
 
 # ── Constantes de simulação ───────────────────────────────────────────────────
 # _V_REF é definido como 440 V (limite superior da classe de tensão industrial
