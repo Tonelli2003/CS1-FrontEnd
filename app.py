@@ -18,6 +18,8 @@ import datetime
 import traceback
 import streamlit as st
 
+from utils import aplicar_estilo_ui
+
 # Import guard: pandas/numpy podem falhar por política de DLL no Windows.
 # O bloco try/except isola o crash no shell, permitindo que o CSS de
 # sanitização e a sidebar renderizem antes de qualquer mensagem de erro.
@@ -45,7 +47,9 @@ st.set_page_config(
     },
 )
 
-# ── 2. Inicialização do Banco de Dados ───────────────────────────────────────
+# Injeção centralizada do CSS de sanitização do framework.
+# Chamada antes de qualquer outro st.markdown para garantir precedência.
+aplicar_estilo_ui()
 # init_db é invocado no shell e não dentro das páginas individuais porque
 # o Streamlit não garante a ordem de execução das páginas em caso de
 # navegação direta via URL. Centralizando aqui, toda sessão tem estado
@@ -53,45 +57,7 @@ st.set_page_config(
 if _backend_ok:
     init_db()
 
-# ── 2.1 Sanitização do Framework ─────────────────────────────────────────────
-# Remove elementos nativos do Streamlit que expõem o framework ao usuário
-# final: header fixo, rodapé "Made with Streamlit" e menu hambúrguer.
-# Os seletores são baseados em data-testid estáveis entre versões minor;
-# verificar em atualizações de versão major do Streamlit.
-st.markdown(
-    """
-    <style>
-    /* Header fixo superior */
-    [data-testid="stHeader"] { display: none !important; }
 
-    /* Rodapé "Made with Streamlit" */
-    [data-testid="stBottom"], footer { display: none !important; }
-
-    /* Menu hambúrguer superior direito */
-    #MainMenu { display: none !important; }
-
-    /* Título nativo "app" no topo da sidebar gerado pelo Streamlit */
-    [data-testid="stSidebarHeader"] { display: none !important; }
-
-    /* Compensa o espaço do header removido */
-    .block-container { padding-top: 1.5rem !important; }
-
-    /* Divider sutil entre sidebar e área de conteúdo */
-    [data-testid="stSidebar"] {
-        border-right: 1px solid rgba(124, 58, 237, 0.25) !important;
-    }
-
-    /* Espaçamento aumentado nos itens de navegação (st.page_link) */
-    [data-testid="stSidebarNav"] a,
-    [data-testid="stSidebarContent"] a {
-        padding-top: 10px !important;
-        padding-bottom: 10px !important;
-        display: block !important;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
 
 # ── 3. CSS Global Inline ─────────────────────────────────────────────────────
 # Complementa o config.toml com ajustes finos que o tema não expõe.

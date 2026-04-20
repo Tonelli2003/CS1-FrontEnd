@@ -20,6 +20,8 @@ import traceback
 
 import streamlit as st
 
+from utils import aplicar_estilo_ui
+
 # Import guard: numpy e pandas podem falhar por política de DLL no Windows.
 # O set_page_config e o bloco de erro são renderizados antes de st.stop()
 # para que a página exiba uma mensagem limpa mesmo sem o backend disponível.
@@ -40,6 +42,9 @@ st.set_page_config(
     page_icon="📈",
     layout="wide",
 )
+
+# CSS global centralizado — garante persistência em qualquer rerun desta página.
+aplicar_estilo_ui()
 
 # ── Inicialização do banco ────────────────────────────────────────────────────
 if _deps_ok:

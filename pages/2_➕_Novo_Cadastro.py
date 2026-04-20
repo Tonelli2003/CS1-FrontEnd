@@ -16,6 +16,7 @@ Decisões de arquitetura:
 
 import streamlit as st
 from backend.mock_db import init_db, adicionar_equipamento
+from utils import aplicar_estilo_ui
 
 # ── Configuração da página ────────────────────────────────────────────────────
 st.set_page_config(
@@ -23,6 +24,9 @@ st.set_page_config(
     page_icon="➕",
     layout="wide",
 )
+
+# CSS global centralizado — garante persistência em qualquer rerun desta página.
+aplicar_estilo_ui()
 
 # ── Inicialização do banco ────────────────────────────────────────────────────
 init_db()
