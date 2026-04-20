@@ -18,7 +18,7 @@ import datetime
 import traceback
 import streamlit as st
 
-from utils import aplicar_estilo_ui
+from utils import aplicar_design_fixo_sidebar
 
 # Import guard: pandas/numpy podem falhar por política de DLL no Windows.
 # O bloco try/except isola o crash no shell, permitindo que o CSS de
@@ -47,9 +47,10 @@ st.set_page_config(
     },
 )
 
-# Injeção centralizada do CSS de sanitização do framework.
-# Chamada antes de qualquer outro st.markdown para garantir precedência.
-aplicar_estilo_ui()
+# Injeta CSS global + renderiza sidebar completa (card, status, nav).
+# Chamada antes de init_db para garantir que o design esteja presente
+# mesmo que o backend falhe logo em seguida.
+aplicar_design_fixo_sidebar()
 # init_db é invocado no shell e não dentro das páginas individuais porque
 # o Streamlit não garante a ordem de execução das páginas em caso de
 # navegação direta via URL. Centralizando aqui, toda sessão tem estado
@@ -183,74 +184,7 @@ st.markdown(
 )
 
 # ── 4. Sidebar ───────────────────────────────────────────────────────────────
-# A sidebar é renderizada explicitamente aqui para garantir consistência
-# visual em todas as páginas. O Streamlit herda o conteúdo da sidebar do
-# app.py em cada navegação, eliminando a necessidade de duplicar o bloco
-# em cada arquivo de /pages.
-with st.sidebar:
-
-    # 4.1  Identidade Visual — substitui o título nativo "app" do Streamlit
-    st.markdown(
-        """
-        <div class="logo-block">
-            <div class="logo-title">GESTÃO DE ATIVOS</div>
-            <div class="logo-subtitle">Challenge Sprint 1 · FIAP</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-)
-
-    st.markdown("---")
-
-    # 4.2  Indicadores de Status do Sistema
-    st.markdown("**Status do Sistema**")
-
-    now_str = datetime.datetime.now().strftime("%H:%M · %d/%m/%Y")
-
-    st.markdown(
-        f"""
-        <div class="status-badge">
-            <span class="dot-online">●</span> Serviço Online
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-    st.caption(f"Última verificação: {now_str}")
-
-    st.markdown(
-        """
-        <div class="status-badge" style="margin-top:6px">
-            <span class="dot-online">●</span> Banco de Dados OK
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    st.markdown(
-        """
-        <div class="status-badge" style="margin-top:6px">
-            <span class="dot-warning">●</span> API Externa — Modo Mock
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    st.markdown("---")
-
-    # 4.3  Navegação (atalhos para as páginas /pages)
-    st.markdown("**Navegação**")
-    st.page_link("app.py",                             label="🏠 Home"               )
-    st.page_link("pages/1_📊_Dashboard_Ativos.py", label="📊 Dashboard de Ativos"  )
-    st.page_link("pages/2_➕_Novo_Cadastro.py",    label="➕ Novo Cadastro"         )
-    st.page_link("pages/3_📈_Monitoramento.py",    label="📈 Monitoramento"         )
-
-    st.markdown("---")
-
-    # 4.4  Informações de Ambiente
-    st.markdown("**Ambiente**")
-    st.caption("🔖 Sprint 1 — v0.1.0")
-    st.caption("🏗️ Stack: Streamlit + Pandas")
-    st.caption("🔗 Backend: Mock (FastAPI em breve)")
+# Renderizada via utils.aplicar_design_fixo_sidebar() chamada acima.
 
 
 # ── 5. Contenção de Erros de Backend ────────────────────────────────────────

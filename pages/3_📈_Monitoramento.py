@@ -21,7 +21,7 @@ import random
 import traceback
 import streamlit as st
 
-from utils import aplicar_estilo_ui
+from utils import aplicar_design_fixo_sidebar
 
 # Import guard: apenas backend.mock_db pode falhar agora.
 _deps_ok = True
@@ -40,8 +40,8 @@ st.set_page_config(
     layout="wide",
 )
 
-# CSS global centralizado — garante persistência em qualquer rerun desta página.
-aplicar_estilo_ui()
+# CSS + sidebar centralizados — persiste em qualquer rerun desta página.
+aplicar_design_fixo_sidebar()
 
 # ── Inicialização do banco ────────────────────────────────────────────────────
 if _deps_ok:
