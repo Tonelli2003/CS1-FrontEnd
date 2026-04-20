@@ -34,14 +34,14 @@ except Exception as _exc:
 
 # ── 1. Configuração da Página ────────────────────────────────────────────────
 st.set_page_config(
-    page_title="Gestão de Ativos | Bitech",
+    page_title="Gestão de Ativos | Challenge Sprint 1",
     page_icon="⚙️",
     layout="wide",
     initial_sidebar_state="expanded",
     menu_items={
         "Get Help": None,
         "Report a bug": None,
-        "About": "**Bitech** · Plataforma de Gestão de Ativos · Sprint 1 © 2026",
+        "About": "**Gestão de Ativos** · Challenge Sprint 1 · FIAP · 2026",
     },
 )
 
@@ -227,8 +227,8 @@ with st.sidebar:
     st.markdown(
         """
         <div class="logo-block">
-            <div class="logo-title">BITECH</div>
-            <div class="logo-subtitle">Gestão de Ativos · Sprint 1</div>
+            <div class="logo-title">GESTÃO DE ATIVOS</div>
+            <div class="logo-subtitle">Challenge Sprint 1 · FIAP</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -323,7 +323,7 @@ st.markdown(
     """
     <div style="margin-bottom: 4px;">
         <span style="font-size:11px; letter-spacing:3px; text-transform:uppercase;
-                     color:#7C3AED; font-weight:600;">Bitech · Challenge Sprint 1</span>
+                     color:#7C3AED; font-weight:600;">Challenge Sprint 1 · FIAP</span>
         <h1 style="font-size:26px; font-weight:800; margin:4px 0 0 0; color:#E4E4E7;">
             Plataforma de Gestão de Ativos
         </h1>
@@ -337,7 +337,7 @@ st.markdown(
 st.markdown(
     """
     <div class="hero-container">
-        <div class="hero-eyebrow">Bitech · Challenge Sprint 1</div>
+        <div class="hero-eyebrow">Challenge Sprint 1 · FIAP</div>
         <div class="hero-title">Plataforma de<br>Gestão de Ativos</div>
         <div class="hero-lead">
             Centralize o cadastro técnico dos seus equipamentos industriais.
@@ -417,7 +417,7 @@ with c3:
 st.markdown(
     f"""
     <div class="footer">
-        Bitech Asset Management Platform · Sprint 1 · v0.1.0 ·
+        Gestão de Ativos · Challenge Sprint 1 · FIAP · v0.1.0 ·
         {datetime.date.today().strftime("%Y")}
     </div>
     """,

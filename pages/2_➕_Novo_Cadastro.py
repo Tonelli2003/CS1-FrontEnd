@@ -19,7 +19,7 @@ from backend.mock_db import init_db, adicionar_equipamento
 
 # ── Configuração da página ────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="Novo Cadastro | Bitech",
+    page_title="Novo Cadastro | Challenge Sprint 1",
     page_icon="➕",
     layout="wide",
 )
@@ -324,7 +324,7 @@ with col_form:
 st.markdown(
     """
     <div class="footer">
-        Bitech Asset Management · Sprint 1 · Formulário de Cadastro Técnico
+        Gestão de Ativos · Challenge Sprint 1 · Formulário de Cadastro Técnico
     </div>
     """,
     unsafe_allow_html=True,

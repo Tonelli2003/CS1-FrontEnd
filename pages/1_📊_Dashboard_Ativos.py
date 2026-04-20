@@ -19,7 +19,7 @@ from backend.mock_db import init_db, get_equipamentos
 
 # ── Configuração da página ────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="Dashboard de Ativos | Bitech",
+    page_title="Dashboard de Ativos | Challenge Sprint 1",
     page_icon="📊",
     layout="wide",
 )
@@ -186,8 +186,7 @@ st.markdown(
     <div class="page-header">
         <h1>Dashboard de Ativos</h1>
         <p>
-            Visão consolidada do parque de equipamentos industriais cadastrados.
-            Utilize os filtros para segmentar e analisar o inventário.
+            Consulte os equipamentos registrados no sistema e acesse a ficha técnica detalhada.
         </p>
     </div>
     """,
@@ -499,7 +498,7 @@ st.markdown(
     """
     <div style="text-align:center; color:#A0AEC0; font-size:11px;
                 padding-top:16px; border-top:1px solid #E2E8F0; margin-top:24px;">
-        Bitech Asset Management · Sprint 1 · Dados simulados via mock_db
+        Gestão de Ativos · Challenge Sprint 1 · Dados simulados via mock_db
     </div>
     """,
     unsafe_allow_html=True,

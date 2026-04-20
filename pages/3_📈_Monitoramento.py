@@ -36,7 +36,7 @@ except Exception as _exc:
 
 # ── Configuração da página ────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="Monitoramento | Bitech",
+    page_title="Monitoramento | Challenge Sprint 1",
     page_icon="📈",
     layout="wide",
 )
@@ -591,7 +591,7 @@ st.markdown(
     """
     <div style="text-align:center; color:#A0AEC0; font-size:11px;
                 padding-top:16px; border-top:1px solid #E2E8F0; margin-top:24px;">
-        Bitech Asset Management · Monitoramento de Telemetria · Sprint 1 · Dados simulados via numpy.random
+        Gestão de Ativos · Monitoramento de Telemetria · Challenge Sprint 1 · Dados simulados via numpy.random
     </div>
     """,
     unsafe_allow_html=True,
