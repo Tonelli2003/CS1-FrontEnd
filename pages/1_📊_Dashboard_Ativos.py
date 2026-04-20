@@ -4,17 +4,17 @@ pages/1_📊_Dashboard_Ativos.py
 Tela de consulta e visão geral do inventário de ativos industriais.
 
 Decisões de arquitetura:
-    - Todos os filtros operam sobre df_full via cópia defensiva (df_filtered),
-      garantindo que o DataFrame original no session_state nunca seja mutado
-      por operações de slicing encadeadas.
-    - A ficha técnica consome df_filtered (não df_display) para preservar
-      os tipos numéricos originais nos cálculos e comparações de negócio.
-    - st.stop() não é usado nesta página porque mesmo sem ativos o
-      dashboard deve exibir os KPIs zerados e o estado vazio da tabela.
+    - get_equipamentos() retorna list[dict] — sem pandas.
+    - Todos os filtros operam sobre lista_filtered via list comprehension,
+      mantendo os tipos nativos Python (float/int) para KPIs e ficha técnica.
+    - A exportação CSV é gerada com o módulo csv da stdlib, sem pandas.
+    - st.stop() não é usado nesta página: mesmo sem ativos o dashboard
+      deve exibir os KPIs zerados e o estado vazio da tabela.
 """
 
+import csv
+import io
 import streamlit as st
-import pandas as pd
 from backend.mock_db import init_db, get_equipamentos
 from utils import aplicar_estilo_ui
 
@@ -200,19 +200,36 @@ st.markdown(
 st.markdown("<br>", unsafe_allow_html=True)
 
 # ── Carrega os dados ──────────────────────────────────────────────────────────
-# df_full é a fonte de verdade imutável para esta renderização.
-# Todos os filtros subsequentes operarão sobre df_filtered (cópia),
+# lista_full é a fonte de verdade imutável para esta renderização.
+# Todos os filtros subsequentes operarão sobre lista_filtered (cópia),
 # preservando os valores originais para os KPIs e para a ficha técnica.
-df_full: pd.DataFrame = get_equipamentos()
+lista_full: list[dict] = get_equipamentos()
 
 # ── KPIs ─────────────────────────────────────────────────────────────────────
-total_ativos    = len(df_full)
-total_fab       = df_full["Fabricante"].nunique() if total_ativos > 0 else 0
-pot_media       = df_full["Potência (kW)"].mean()  if total_ativos > 0 else 0.0
-pot_max         = df_full["Potência (kW)"].max()   if total_ativos > 0 else 0.0
-tensao_mais_comum = (
-    df_full["Tensão (V)"].mode().iloc[0] if total_ativos > 0 else "—"
+total_ativos = len(lista_full)
+
+# set() elimina duplicatas; sorted() para ordenação estável nas opções de filtro.
+fabricantes_set  = set(eq["Fabricante"] for eq in lista_full)
+total_fab        = len(fabricantes_set)
+
+pot_media = (
+    sum(eq["Potência (kW)"] for eq in lista_full) / total_ativos
+    if total_ativos > 0 else 0.0
 )
+pot_max = (
+    max(eq["Potência (kW)"] for eq in lista_full)
+    if total_ativos > 0 else 0.0
+)
+
+# Tensão mais comum: dict de frequências + max por valor
+if total_ativos > 0:
+    freq_tensao: dict = {}
+    for eq in lista_full:
+        v = eq["Tensão (V)"]
+        freq_tensao[v] = freq_tensao.get(v, 0) + 1
+    tensao_mais_comum = max(freq_tensao, key=lambda k: freq_tensao[k])
+else:
+    tensao_mais_comum = "—"
 
 col_k1, col_k2, col_k3, col_k4, col_k5 = st.columns(5)
 
@@ -250,7 +267,7 @@ st.markdown(
 col_f1, col_f2, col_f3 = st.columns([2, 2, 1])
 
 with col_f1:
-    fabricantes_disponiveis = sorted(df_full["Fabricante"].unique().tolist()) if total_ativos > 0 else []
+    fabricantes_disponiveis = sorted(fabricantes_set) if total_ativos > 0 else []
     fabricante_sel = st.multiselect(
         label="Fabricante",
         options=fabricantes_disponiveis,
@@ -260,9 +277,8 @@ with col_f1:
 
 with col_f2:
     if total_ativos > 0:
-        pot_min_val = float(df_full["Potência (kW)"].min())
-        pot_max_val = float(df_full["Potência (kW)"].max())
-        # Garante que min != max (ex: só 1 registro)
+        pot_min_val = float(min(eq["Potência (kW)"] for eq in lista_full))
+        pot_max_val = float(max(eq["Potência (kW)"] for eq in lista_full))
         if pot_min_val == pot_max_val:
             pot_max_val = pot_min_val + 1.0
         faixa_potencia = st.slider(
@@ -285,25 +301,23 @@ with col_f3:
     )
 
 # ── Aplicação dos Filtros ─────────────────────────────────────────────────────
-# Os filtros são aplicados em cadeia sobre df_filtered.
+# Os filtros são aplicados em cadeia sobre lista_filtered via list comprehension.
 # A ordem importa: fabricante → potência → TAG. Filtros mais seletivos
-# reduzem o conjunto antes da busca por string, que é a operação mais
-# custosa para inventários com muitos registros.
-df_filtered = df_full.copy()
+# reduzem o conjunto antes da busca por string.
+lista_filtered: list[dict] = list(lista_full)
 
 if fabricante_sel:
-    df_filtered = df_filtered[df_filtered["Fabricante"].isin(fabricante_sel)]
+    lista_filtered = [eq for eq in lista_filtered if eq["Fabricante"] in fabricante_sel]
 
 if total_ativos > 0:
-    df_filtered = df_filtered[
-        (df_filtered["Potência (kW)"] >= faixa_potencia[0]) &
-        (df_filtered["Potência (kW)"] <= faixa_potencia[1])
+    lista_filtered = [
+        eq for eq in lista_filtered
+        if faixa_potencia[0] <= eq["Potência (kW)"] <= faixa_potencia[1]
     ]
 
 if busca_tag.strip():
-    df_filtered = df_filtered[
-        df_filtered["TAG"].str.contains(busca_tag.strip(), case=False, na=False)
-    ]
+    termo = busca_tag.strip().lower()
+    lista_filtered = [eq for eq in lista_filtered if termo in eq["TAG"].lower()]
 
 st.markdown("<hr class='section-divider'>", unsafe_allow_html=True)
 
@@ -313,11 +327,11 @@ with col_th1:
     st.markdown("<div class='table-title'>📋 Inventário de Equipamentos</div>", unsafe_allow_html=True)
 with col_th2:
     st.markdown(
-        f"<div class='tag-count' style='text-align:right'>{len(df_filtered)} registro(s)</div>",
+        f"<div class='tag-count' style='text-align:right'>{len(lista_filtered)} registro(s)</div>",
         unsafe_allow_html=True,
     )
 
-if df_filtered.empty:
+if not lista_filtered:
     st.markdown(
         """
         <div class="empty-state">
@@ -331,15 +345,21 @@ if df_filtered.empty:
         unsafe_allow_html=True,
     )
 else:
-    # df_display existe exclusivamente para formatação visual da tabela.
-    # A ficha técnica abaixo usa df_filtered lido diretamente para
-    # manter os tipos float/int originais e evitar parse de strings formatadas.
-    df_display = df_filtered.copy()
-    df_display["Potência (kW)"] = df_display["Potência (kW)"].map(lambda x: f"{x:.1f} kW")
-    df_display["Tensão (V)"]    = df_display["Tensão (V)"].map(lambda x: f"{int(x)} V")
+    # lista_display formata os valores para exibição visual.
+    # lista_filtered preserva os tipos originais para a ficha técnica abaixo.
+    lista_display = [
+        {
+            "TAG":            eq["TAG"],
+            "Modelo":         eq["Modelo"],
+            "Fabricante":     eq["Fabricante"],
+            "Potência (kW)":  f"{eq['Potência (kW)']:.1f} kW",
+            "Tensão (V)":     f"{int(eq['Tensão (V)'])} V",
+        }
+        for eq in lista_filtered
+    ]
 
     st.dataframe(
-        df_display,
+        lista_display,
         use_container_width=True,
         hide_index=True,
         column_config={
@@ -371,10 +391,16 @@ else:
     )
 
     # ── Exportação rápida ────────────────────────────────────────────────────
+    # CSV gerado com stdlib csv — sem dependência de pandas.
     st.markdown("<br>", unsafe_allow_html=True)
     col_exp1, col_exp2 = st.columns([5, 1])
     with col_exp2:
-        csv_bytes = df_filtered.to_csv(index=False).encode("utf-8")
+        _buf = io.StringIO()
+        _writer = csv.DictWriter(_buf, fieldnames=["TAG", "Modelo", "Fabricante", "Potência (kW)", "Tensão (V)"])
+        _writer.writeheader()
+        _writer.writerows(lista_filtered)
+        csv_bytes = _buf.getvalue().encode("utf-8")
+
         st.download_button(
             label="⬇️ Exportar CSV",
             data=csv_bytes,
@@ -397,8 +423,7 @@ else:
         unsafe_allow_html=True,
     )
 
-    # Selectbox com as TAGs disponíveis no resultado filtrado
-    tags_disponiveis = df_filtered["TAG"].tolist()
+    tags_disponiveis = [eq["TAG"] for eq in lista_filtered]
     tag_selecionada = st.selectbox(
         label="Selecione a TAG do equipamento para consultar a ficha técnica:",
         options=tags_disponiveis,
@@ -409,8 +434,8 @@ else:
     )
 
     if tag_selecionada:
-        # Localiza o registro original (sem formatação de exibição)
-        registro = df_filtered[df_filtered["TAG"] == tag_selecionada].iloc[0]
+        # Localiza o registro original (com tipos numéricos preservados)
+        registro = next(eq for eq in lista_filtered if eq["TAG"] == tag_selecionada)
 
         with st.expander(
             f"📋 Ficha Técnica Completa — {tag_selecionada}",
@@ -455,10 +480,7 @@ else:
 
             with col_a2:
                 potencia_val = registro["Potência (kW)"]
-                # Limiar de 50 kW é a linha de corte entre motores de uso geral
-                # e equipamentos de média tensão que exigem gestão de demanda
-                # e infraestrutura elétrica dedicada. O st.warning sinaliza
-                # essa distinção diretamente para o analista de manutenção.
+                # Limiar de 50 kW — vide comentário em mock_db.py
                 if potencia_val > 50:
                     st.warning(
                         f"**⚡ Potência Nominal:** `{potencia_val:.1f} kW`\n\n"

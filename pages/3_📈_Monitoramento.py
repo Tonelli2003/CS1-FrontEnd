@@ -4,33 +4,30 @@ pages/3_📈_Monitoramento.py
 Tela de Visualização de Dados Brutos — telemetria simulada de sensores.
 
 Decisões de arquitetura:
-    - numpy.random.default_rng com seed determinística (hash(TAG) + segundo_atual)
-      gera valores diferentes a cada rerun sem depender de estado externo,
-      simulando a chegada de novas amostras sem um WebSocket real.
-    - O histórico usa seed indexada por minuto (não por segundo) para que
-      a série temporal pareça estável durante a navegação dentro do mesmo
-      minuto, enquanto a leitura atual varia a cada rerun.
-    - st.stop() é chamado quando não há ativos para evitar que todos os
-      blocos subsequentes renderizem com DataFrames vazios, o que geraria
-      exceções de índice difíceis de depurar.
+    - Todas as dependências externas (numpy, pandas) foram removidas.
+      random.gauss() do stdlib substitui np.random.normal().
+      random.seed() com hash(TAG)+segundo garante variação por rerun.
+    - O histórico usa seed por minuto para aparência estável durante
+      a navegação dentro do mesmo minuto.
+    - st.line_chart aceita list[dict] nativamente — sem DataFrame.
+    - st.stop() é chamado quando não há ativos para evitar IndexError
+      nos blocos subsequentes.
 """
 
+import csv
 import datetime
+import io
+import random
 import traceback
-
 import streamlit as st
 
 from utils import aplicar_estilo_ui
 
-# Import guard: numpy e pandas podem falhar por política de DLL no Windows.
-# O set_page_config e o bloco de erro são renderizados antes de st.stop()
-# para que a página exiba uma mensagem limpa mesmo sem o backend disponível.
+# Import guard: apenas backend.mock_db pode falhar agora.
 _deps_ok = True
 _deps_traceback = ""
 
 try:
-    import numpy as np
-    import pandas as pd
     from backend.mock_db import init_db, get_equipamentos
 except Exception as _exc:
     _deps_ok = False
@@ -85,7 +82,6 @@ _ADC_BITS: int   = 1023
 _V_REF: float    = 440.0
 
 # 3600 RPM corresponde a um motor síncrono de 2 pólos em 60 Hz.
-# É o teto físico plausível sem redução mecânica para o período de simulação.
 _RPM_MAX: float  = 3600.0
 _HIST_POINTS: int = 60
 
@@ -238,12 +234,10 @@ st.markdown(
 st.markdown("<br>", unsafe_allow_html=True)
 
 # ── Carrega equipamentos ──────────────────────────────────────────────────────
-df_eq: pd.DataFrame = get_equipamentos()
+lista_eq: list[dict] = get_equipamentos()
 
-# Guard clause: sem ativos, todos os blocos posteriores falhariam em
-# df_eq[df_eq["TAG"] == tag_sel].iloc[0] com IndexError silencioso.
-# st.stop() interrompe a execução do script neste ponto sem lançar exceção.
-if df_eq.empty:
+# Guard clause: sem ativos, st.stop() previne IndexError nos blocos seguintes.
+if not lista_eq:
     st.warning(
         "⚠️ **Nenhum equipamento cadastrado.**\n\n"
         "Acesse a página **➕ Novo Cadastro** para registrar ativos antes de iniciar o monitoramento."
@@ -264,7 +258,7 @@ st.markdown(
 col_sel, col_badge = st.columns([4, 1])
 
 with col_sel:
-    tags_list = df_eq["TAG"].tolist()
+    tags_list = [eq["TAG"] for eq in lista_eq]
     tag_sel = st.selectbox(
         label="Selecione o equipamento para monitorar:",
         options=tags_list,
@@ -282,14 +276,13 @@ with col_badge:
     )
 
 # ── Dados do ativo selecionado ────────────────────────────────────────────────
-ativo = df_eq[df_eq["TAG"] == tag_sel].iloc[0]
+ativo = next(eq for eq in lista_eq if eq["TAG"] == tag_sel)
 tensao_nominal: float = float(ativo["Tensão (V)"])
 potencia_kw: float    = float(ativo["Potência (kW)"])
 
 # rpm_nominal é estimado por heurística de placa porque o schema do ativo
 # não armazena RPM. O limiar de 50 kW separa motores de indução de uso
-# geral (1.800 RPM, 4 pólos) de motores de alta potência (3.600 RPM, 2 pólos)
-# na linha industrial padrão WEG/Siemens.
+# geral (1.800 RPM, 4 pólos) de motores de alta potência (3.600 RPM, 2 pólos).
 rpm_nominal = _RPM_MAX if potencia_kw >= 50 else 1800.0
 
 # Barra de informações do ativo
@@ -324,13 +317,18 @@ st.markdown(
 st.markdown("<hr class='section-divider'>", unsafe_allow_html=True)
 
 # ── Geração de sinais simulados ───────────────────────────────────────────────
-# Seeds distintas para leitura atual e histórico garantem que os dois não
-# se tornem idênticos quando o usuário navega no mesmo segundo.
-# `% (2**31)` mantém o seed dentro do limite aceito pelo PCG64 (numpy).
-_seed = (hash(tag_sel) + int(datetime.datetime.now().second)) % (2**31)
-rng   = np.random.default_rng(seed=_seed)
+# Seeds distintas para leitura atual e histórico. random.seed() é global,
+# então salvamos e restauramos o estado para não contaminar a série histórica.
+_seed_atual = (hash(tag_sel) + int(datetime.datetime.now().second)) % (2**31)
 
-def _adc_de_tensao(v_real: float) -> int:
+
+def _gauss_clamp(mu: float, sigma: float, lo: float, hi: float, seed: int) -> float:
+    """Gera valor gaussiano clampado entre [lo, hi] com seed determinística."""
+    random.seed(seed)
+    return max(lo, min(hi, random.gauss(mu, sigma)))
+
+
+def _adc_de_tensao(v_real: float, seed: int) -> int:
     """
     Converte Volts reais em leitura ADC de 10 bits com ruído gaussiano.
 
@@ -338,47 +336,49 @@ def _adc_de_tensao(v_real: float) -> int:
     típicas de um ADC SAR sem filtro anti-aliasing dedicado.
     """
     bits = int((v_real / _V_REF) * _ADC_BITS)
-    ruido = int(rng.normal(0, _ADC_BITS * 0.02))
-    return int(np.clip(bits + ruido, 0, _ADC_BITS))
+    random.seed(seed)
+    ruido = int(random.gauss(0, _ADC_BITS * 0.02))
+    return max(0, min(_ADC_BITS, bits + ruido))
 
-def _adc_de_rpm(rpm_real: float) -> int:
+
+def _adc_de_rpm(rpm_real: float, seed: int) -> int:
     """Converte RPM real → bits ADC (0–1023) com ruído ±1.5%."""
     bits = int((rpm_real / _RPM_MAX) * _ADC_BITS)
-    ruido = int(rng.normal(0, _ADC_BITS * 0.015))
-    return int(np.clip(bits + ruido, 0, _ADC_BITS))
+    random.seed(seed)
+    ruido = int(random.gauss(0, _ADC_BITS * 0.015))
+    return max(0, min(_ADC_BITS, bits + ruido))
+
 
 def _bits_para_volts(bits: int) -> float:
     """Converte bits ADC → Volts reais."""
     return round((bits / _ADC_BITS) * _V_REF, 2)
 
+
 def _bits_para_rpm(bits: int) -> float:
     """Converte bits ADC → RPM reais."""
     return round((bits / _ADC_BITS) * _RPM_MAX, 1)
 
+
 # Leituras atuais
-bits_tensao_atual = _adc_de_tensao(tensao_nominal)
-bits_rpm_atual    = _adc_de_rpm(rpm_nominal)
+bits_tensao_atual = _adc_de_tensao(tensao_nominal, _seed_atual)
+bits_rpm_atual    = _adc_de_rpm(rpm_nominal, _seed_atual + 1)
 
 volts_atual = _bits_para_volts(bits_tensao_atual)
 rpm_atual   = _bits_para_rpm(bits_rpm_atual)
 
 # Leituras anteriores (simula sample anterior — seed -1s)
-rng_prev = np.random.default_rng(seed=(_seed - 1) % (2**31))
-bits_tensao_prev = int(np.clip(
-    int((tensao_nominal / _V_REF) * _ADC_BITS) + int(rng_prev.normal(0, _ADC_BITS * 0.02)),
-    0, _ADC_BITS))
-bits_rpm_prev = int(np.clip(
-    int((rpm_nominal / _RPM_MAX) * _ADC_BITS) + int(rng_prev.normal(0, _ADC_BITS * 0.015)),
-    0, _ADC_BITS))
+_seed_prev = (_seed_atual - 1) % (2**31)
+bits_tensao_prev = _adc_de_tensao(tensao_nominal, _seed_prev)
+bits_rpm_prev    = _adc_de_rpm(rpm_nominal, _seed_prev + 1)
 
 volts_prev = _bits_para_volts(bits_tensao_prev)
 rpm_prev   = _bits_para_rpm(bits_rpm_prev)
 
 # Deltas
-delta_bits_v  = bits_tensao_atual - bits_tensao_prev
-delta_bits_r  = bits_rpm_atual    - bits_rpm_prev
-delta_volts   = round(volts_atual  - volts_prev,   2)
-delta_rpm     = round(rpm_atual    - rpm_prev,     1)
+delta_bits_v = bits_tensao_atual - bits_tensao_prev
+delta_bits_r = bits_rpm_atual    - bits_rpm_prev
+delta_volts  = round(volts_atual - volts_prev, 2)
+delta_rpm    = round(rpm_atual   - rpm_prev,   1)
 
 # ── Métricas — Sinal Bruto ────────────────────────────────────────────────────
 st.markdown(
@@ -448,8 +448,8 @@ col_c2.metric(
 
 # Potência estimada via V² / R (R estimada pela potência nominal)
 r_estimada = (tensao_nominal ** 2) / (potencia_kw * 1000) if potencia_kw > 0 else 1.0
-pot_estimada_w = (volts_atual ** 2) / r_estimada
-pot_estimada_prev = (volts_prev ** 2) / r_estimada
+pot_estimada_w    = (volts_atual ** 2) / r_estimada
+pot_estimada_prev = (volts_prev  ** 2) / r_estimada
 delta_pot = round((pot_estimada_w - pot_estimada_prev) / 1000, 3)
 
 col_c3.metric(
@@ -459,7 +459,6 @@ col_c3.metric(
     help="Estimativa via Lei de Joule: P = V² / R (R calculada da placa nominal).",
 )
 
-# Desvio percentual em relação ao nominal
 desvio_pct = round(((volts_atual - tensao_nominal) / tensao_nominal) * 100, 2)
 col_c4.metric(
     label="📊 Desvio da Tensão Nominal",
@@ -482,35 +481,36 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# Gera histórico usando numpy com ruído realista (seed fixo por TAG + minuto)
+# Seed fixo por TAG + minuto — série aparece estável durante o mesmo minuto.
 _seed_hist = (hash(tag_sel) + int(datetime.datetime.now().minute)) % (2**31)
-rng_hist   = np.random.default_rng(seed=_seed_hist)
+random.seed(_seed_hist)
 
-# Timestamps fictícios (últimos 60 segundos)
 now_dt = datetime.datetime.now()
 timestamps = [now_dt - datetime.timedelta(seconds=(_HIST_POINTS - i)) for i in range(_HIST_POINTS)]
 
-# Séries de tensão com drift lento + ruído gaussiano
-v_base_series   = tensao_nominal + rng_hist.normal(0, tensao_nominal * 0.015, _HIST_POINTS)
-v_drift         = np.linspace(0, rng_hist.uniform(-2, 2), _HIST_POINTS)  # drift ±2 V
-tensao_hist     = np.clip(v_base_series + v_drift, 0, _V_REF)
+# Séries históricas geradas com random.gauss — sem numpy.
+# drift_v: variação lenta de ±2 V ao longo das 60 amostras.
+drift_step = random.uniform(-2, 2) / _HIST_POINTS
+tensao_hist: list[float] = []
+rpm_hist:    list[float] = []
+pot_hist_kw: list[float] = []
 
-# Séries de RPM com bursts ocasionais
-rpm_base_series = rpm_nominal + rng_hist.normal(0, rpm_nominal * 0.01, _HIST_POINTS)
-rpm_bursts      = np.where(rng_hist.uniform(0, 1, _HIST_POINTS) > 0.92,
-                           rng_hist.normal(rpm_nominal * 0.05, 10, _HIST_POINTS), 0)
-rpm_hist        = np.clip(rpm_base_series + rpm_bursts, 0, _RPM_MAX)
+for i in range(_HIST_POINTS):
+    v = max(0.0, min(_V_REF, tensao_nominal + random.gauss(0, tensao_nominal * 0.015) + drift_step * i))
+    r = max(0.0, min(_RPM_MAX, rpm_nominal + random.gauss(0, rpm_nominal * 0.01)))
+    # burst ocasional de RPM (~8% dos samples)
+    if random.random() > 0.92:
+        r = max(0.0, min(_RPM_MAX, r + random.gauss(rpm_nominal * 0.05, 10)))
+    p = round((v ** 2) / (r_estimada * 1000), 3)
+    tensao_hist.append(round(v, 2))
+    rpm_hist.append(round(r, 1))
+    pot_hist_kw.append(p)
 
-# Potência estimada ao longo do tempo
-pot_hist_kw = (tensao_hist ** 2) / (r_estimada * 1000)
+# st.line_chart aceita list[dict] diretamente — sem pandas.
+hist_v   = [{"Tensão (V)":    tensao_hist[i]}  for i in range(_HIST_POINTS)]
+hist_rpm = [{"RPM":           rpm_hist[i]}     for i in range(_HIST_POINTS)]
+hist_pot = [{"Potência (kW)": pot_hist_kw[i]}  for i in range(_HIST_POINTS)]
 
-df_hist = pd.DataFrame({
-    "Tensão (V)":      tensao_hist.round(2),
-    "RPM":             rpm_hist.round(1),
-    "Potência (kW)":   pot_hist_kw.round(3),
-}, index=pd.DatetimeIndex(timestamps))
-
-# Abas de gráficos por grandeza
 tab_v, tab_rpm, tab_pot = st.tabs(["🔌 Tensão (V)", "🌀 RPM", "⚡ Potência (kW)"])
 
 with tab_v:
@@ -519,12 +519,7 @@ with tab_v:
         f"Desvio atual: {desvio_pct:+.2f}%</div>",
         unsafe_allow_html=True,
     )
-    st.line_chart(
-        df_hist[["Tensão (V)"]],
-        use_container_width=True,
-        height=280,
-        color=["#1560BD"],
-    )
+    st.line_chart(hist_v, use_container_width=True, height=280, color=["#1560BD"])
 
 with tab_rpm:
     st.markdown(
@@ -532,12 +527,7 @@ with tab_rpm:
         f"Última leitura: {rpm_atual:.0f} RPM</div>",
         unsafe_allow_html=True,
     )
-    st.line_chart(
-        df_hist[["RPM"]],
-        use_container_width=True,
-        height=280,
-        color=["#2272D9"],
-    )
+    st.line_chart(hist_rpm, use_container_width=True, height=280, color=["#2272D9"])
 
 with tab_pot:
     st.markdown(
@@ -545,12 +535,7 @@ with tab_pot:
         f"Atual: {pot_estimada_w / 1000:.3f} kW</div>",
         unsafe_allow_html=True,
     )
-    st.line_chart(
-        df_hist[["Potência (kW)"]],
-        use_container_width=True,
-        height=280,
-        color=["#0D3B8E"],
-    )
+    st.line_chart(hist_pot, use_container_width=True, height=280, color=["#0D3B8E"])
 
 st.markdown("<hr class='section-divider'>", unsafe_allow_html=True)
 
@@ -558,17 +543,21 @@ st.markdown("<hr class='section-divider'>", unsafe_allow_html=True)
 with st.expander("🗂️ Tabela de Dados Brutos — Últimas 60 Amostras", expanded=False):
     st.caption("Valores históricos brutos exportáveis. Use o botão de download para salvar o log.")
 
-    df_raw = pd.DataFrame({
-        "Timestamp":         [t.strftime("%H:%M:%S") for t in timestamps],
-        "ADC Tensão (bits)": [_adc_de_tensao(v) for v in tensao_hist],
-        "Tensão (V)":        tensao_hist.round(2),
-        "ADC RPM (bits)":    [_adc_de_rpm(r) for r in rpm_hist],
-        "RPM":               rpm_hist.round(1),
-        "Potência (kW)":     pot_hist_kw.round(3),
-    })
+    # Lista de dicts — st.dataframe aceita sem pandas.
+    tabela_raw = [
+        {
+            "Timestamp":         timestamps[i].strftime("%H:%M:%S"),
+            "ADC Tensão (bits)": _adc_de_tensao(tensao_hist[i], _seed_hist + i),
+            "Tensão (V)":        tensao_hist[i],
+            "ADC RPM (bits)":    _adc_de_rpm(rpm_hist[i], _seed_hist + i + 1),
+            "RPM":               rpm_hist[i],
+            "Potência (kW)":     pot_hist_kw[i],
+        }
+        for i in range(_HIST_POINTS)
+    ]
 
     st.dataframe(
-        df_raw,
+        tabela_raw,
         use_container_width=True,
         hide_index=True,
         column_config={
@@ -581,7 +570,16 @@ with st.expander("🗂️ Tabela de Dados Brutos — Últimas 60 Amostras", expa
         },
     )
 
-    csv_raw = df_raw.to_csv(index=False).encode("utf-8")
+    # CSV gerado com stdlib csv — sem pandas.
+    _buf = io.StringIO()
+    _writer = csv.DictWriter(
+        _buf,
+        fieldnames=["Timestamp", "ADC Tensão (bits)", "Tensão (V)", "ADC RPM (bits)", "RPM", "Potência (kW)"],
+    )
+    _writer.writeheader()
+    _writer.writerows(tabela_raw)
+    csv_raw = _buf.getvalue().encode("utf-8")
+
     st.download_button(
         label="⬇️ Exportar Log CSV",
         data=csv_raw,
@@ -596,7 +594,7 @@ st.markdown(
     """
     <div style="text-align:center; color:#A0AEC0; font-size:11px;
                 padding-top:16px; border-top:1px solid #E2E8F0; margin-top:24px;">
-        Gestão de Ativos · Monitoramento de Telemetria · Challenge Sprint 1 · Dados simulados via numpy.random
+        Gestão de Ativos · Monitoramento de Telemetria · Challenge Sprint 1 · Dados simulados via random (stdlib)
     </div>
     """,
     unsafe_allow_html=True,

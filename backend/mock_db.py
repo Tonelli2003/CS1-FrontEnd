@@ -13,10 +13,13 @@ Decisão de arquitetura:
     adicionar_equipamento) é idêntico ao que será exposto pelas
     chamadas REST futuras, isolando o frontend de qualquer detalhe
     de persistência.
+
+    Refatoração: pandas removido — o estado é uma lista nativa de
+    dicionários. st.dataframe() aceita esse formato diretamente e
+    todas as operações de filtragem usam list comprehension.
 """
 
 import time
-import pandas as pd
 import streamlit as st
 
 # ---------------------------------------------------------------------------
@@ -27,8 +30,8 @@ import streamlit as st
 # de nome entre páginas distintas que compartilham o mesmo estado global.
 _DB_KEY: str = "equipamentos_db"
 
-# Schema explícito garante que concatenações via pd.concat respeitem a
-# ordem das colunas independente da ordem dos dicts passados como entrada.
+# Chaves canônicas do schema — usadas para garantir ordem consistente
+# na exportação CSV e na exibição tabular.
 _COLUNAS: list[str] = ["TAG", "Modelo", "Fabricante", "Potência (kW)", "Tensão (V)"]
 
 
@@ -50,7 +53,7 @@ def init_db() -> None:
         None
     """
     if _DB_KEY not in st.session_state:
-        dados_iniciais: list[dict] = [
+        st.session_state[_DB_KEY] = [
             {
                 "TAG": "EQ-001",
                 "Modelo": "Motor WEG W22",
@@ -66,20 +69,20 @@ def init_db() -> None:
                 "Tensão (V)": 220,
             },
         ]
-        st.session_state[_DB_KEY] = pd.DataFrame(dados_iniciais, columns=_COLUNAS)
 
 
-def get_equipamentos() -> pd.DataFrame:
+def get_equipamentos() -> list[dict]:
     """
-    Retorna cópia defensiva do DataFrame de equipamentos cadastrados.
+    Retorna cópia defensiva da lista de equipamentos cadastrados.
 
-    Retorna `.copy()` para evitar que mutações no DataFrame do chamador
-    corrompam o estado global. O RuntimeError serve de contrato explícito:
-    qualquer página que chame esta função sem init_db() anterior recebe
-    uma mensagem acionável em vez de um KeyError difícil de rastrear.
+    Retorna uma cópia rasa via list() para evitar que mutações no
+    chamador corrompam o estado global. O RuntimeError serve de
+    contrato explícito: qualquer página que chame esta função sem
+    init_db() anterior recebe uma mensagem acionável em vez de um
+    KeyError difícil de rastrear.
 
     Returns:
-        pd.DataFrame: Cópia do DataFrame com todos os equipamentos cadastrados.
+        list[dict]: Cópia da lista de dicionários com todos os equipamentos.
 
     Raises:
         RuntimeError: Se `init_db()` não foi chamado antes desta função.
@@ -89,7 +92,7 @@ def get_equipamentos() -> pd.DataFrame:
             "Banco de dados não inicializado. "
             "Certifique-se de chamar `init_db()` na inicialização do app."
         )
-    return st.session_state[_DB_KEY].copy()
+    return list(st.session_state[_DB_KEY])
 
 
 def adicionar_equipamento(novo_dict: dict) -> None:
@@ -101,8 +104,8 @@ def adicionar_equipamento(novo_dict: dict) -> None:
     os componentes de feedback de UX (spinners, mensagens de estado)
     antes da integração, sem precisar de um servidor em execução.
 
-    pd.concat é usado no lugar de df.append (removido no Pandas 2.0)
-    e garante que o índice seja reiniciado para evitar duplicatas.
+    list.append() opera in-place diretamente sobre a referência do
+    session_state, dispensando reatribuição explícita.
 
     Args:
         novo_dict (dict): Dicionário com os dados do novo equipamento.
@@ -132,8 +135,4 @@ def adicionar_equipamento(novo_dict: dict) -> None:
     # Remover apenas quando a integração real estiver ativa.
     time.sleep(1)
 
-    novo_df: pd.DataFrame = pd.DataFrame([novo_dict], columns=_COLUNAS)
-    st.session_state[_DB_KEY] = pd.concat(
-        [st.session_state[_DB_KEY], novo_df],
-        ignore_index=True,
-    )
+    st.session_state[_DB_KEY].append(novo_dict)
