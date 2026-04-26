@@ -93,11 +93,11 @@ A aplicação ficará disponível em `http://localhost:8501`.
 
 | Nome                                    |
 |:----------------------------------------|
-| Gabriel Tonelli Avelino dos Santos      |
-| Augusto Oliveira Codo de Sousa          |
-| Felipe de Oliveira Cabral               |
-| Sofia Bueris Netto de Souza             |
-| Vinícius Adrian Siqueira de Oliveira    |
+| Augusto Oliveira Codo de Sousa | RM562080  |
+| Felipe de Oliveira Cabral | RM561720  |
+| Gabriel Tonelli Avelino Dos Santos | RM564705  |
+| Vinícius Adrian Siqueira de Oliveira | RM564962 |
+| Sofia Bueris Netto de Souza | RM565818  |
 
 ---
 

@@ -17,6 +17,7 @@ Decisão de arquitetura:
 import datetime
 import traceback
 import streamlit as st
+import pandas as pd
 
 from utils import aplicar_design_fixo_sidebar
 
@@ -256,16 +257,23 @@ st.markdown("<br>", unsafe_allow_html=True)
 # porque a landing page exibe apenas um resumo superficial. Evitar a
 # função pública preserva a semântica de que get_equipamentos() é
 # exclusivo de páginas que consomem o DataFrame completo.
+
 df = st.session_state.get("equipamentos_db")
+
+# Converte a lista para DataFrame do Pandas para permitir cálculos e buscas por coluna
+if df is not None and isinstance(df, list):
+    df = pd.DataFrame(df)
+
 total   = len(df) if df is not None else 0
-fab_u   = df["Fabricante"].nunique() if df is not None else 0
+# Adicionei uma verificação 'total > 0' no fab_u também para evitar erros caso o DataFrame esteja vazio
+fab_u   = df["Fabricante"].nunique() if df is not None and total > 0 else 0
 pot_med = f'{df["Potência (kW)"].mean():.1f} kW' if df is not None and total > 0 else "—"
 
 col_m1, col_m2, col_m3, col_m4 = st.columns(4)
 col_m1.metric("⚙️ Ativos Cadastrados", total)
-col_m2.metric("🏭 Fabricantes",         fab_u)
+col_m2.metric("🏭 Fabricantes",        fab_u)
 col_m3.metric("⚡ Potência Média",       pot_med)
-col_m4.metric("📡 Status API",           "Mock Ativo")
+col_m4.metric("📡 Status API",          "Mock Ativo")
 
 st.markdown("---")
 
