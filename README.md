@@ -91,8 +91,8 @@ A aplicação ficará disponível em `http://localhost:8501`.
 
 ## Equipe de Desenvolvimento
 
-| Nome                                    |
-|:----------------------------------------|
+| Nome                                    | RM       |
+|:----------------------------------------|:---------|
 | Augusto Oliveira Codo de Sousa | RM562080  |
 | Felipe de Oliveira Cabral | RM561720  |
 | Gabriel Tonelli Avelino Dos Santos | RM564705  |
