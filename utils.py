@@ -50,7 +50,7 @@ def aplicar_design_fixo_sidebar() -> None:
         """
         <style>
         /* ── Sanitização do framework ─────────────────────────────────── */
-        [data-testid="stHeader"]       { display: none !important; }
+        /* [data-testid="stHeader"]       { display: none !important; } */
         [data-testid="stBottom"],
         footer                         { display: none !important; }
         #MainMenu                      { display: none !important; }
