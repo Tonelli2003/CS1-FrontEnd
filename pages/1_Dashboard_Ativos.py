@@ -1,0 +1,709 @@
+"""
+pages/1_📊_Dashboard_Ativos.py
+------------------------------
+Tela de consulta e visão geral do inventário de ativos industriais.
+
+Decisões de arquitetura:
+    - get_equipamentos() retorna list[dict] — sem pandas.
+    - Todos os filtros operam sobre lista_filtered via list comprehension,
+      mantendo os tipos nativos Python (float/int) para KPIs e ficha técnica.
+    - A exportação CSV é gerada com o módulo csv da stdlib, sem pandas.
+    - st.stop() não é usado nesta página: mesmo sem ativos o dashboard
+      deve exibir os KPIs zerados e o estado vazio da tabela.
+
+    Sprint 2:
+    - Métricas por planta no topo usando st.columns.
+    - Filtro selectbox de planta aplicado em cadeia com os demais filtros.
+    - Coluna 'Saúde' na tabela computada via avaliar_saude() + último ponto
+      de telemetria gerado por obter_telemetria_historica().
+"""
+
+import csv
+import io
+import streamlit as st
+from backend.mock_db import (
+    init_db,
+    get_equipamentos,
+    obter_telemetria_historica,
+    avaliar_saude,
+)
+from utils import aplicar_design_fixo_sidebar, kpi_card, section_header, PALETTE
+
+# ── Configuração da página ────────────────────────────────────────────────────
+st.set_page_config(
+    page_title="Dashboard de Ativos | Challenge Sprint 2",
+    page_icon="📊",
+    layout="wide",
+)
+
+# CSS + sidebar centralizados — persiste em qualquer rerun desta página.
+aplicar_design_fixo_sidebar()
+
+# ── Inicialização do banco ────────────────────────────────────────────────────
+init_db()
+
+# ── CSS da página ─────────────────────────────────────────────────────────────
+st.markdown(
+    """
+    <style>
+    /* Sidebar mantém padrão corporativo do app.py */
+    [data-testid="stSidebar"] { background-color: #0D3B8E; }
+    [data-testid="stSidebar"] * { color: #E8F0FE !important; }
+    [data-testid="stSidebar"] hr { border-color: #1A4FAD; }
+
+    /* Cabeçalho da página */
+    .page-header {
+        background: linear-gradient(135deg, #0D3B8E 0%, #1560BD 60%, #2272D9 100%);
+        border-radius: 12px;
+        padding: 28px 36px;
+        margin-bottom: 4px;
+        position: relative;
+        overflow: hidden;
+    }
+    .page-header::after {
+        content: "📊";
+        position: absolute;
+        right: 32px; top: 50%;
+        transform: translateY(-50%);
+        font-size: 80px;
+        opacity: 0.10;
+    }
+    .page-header h1 {
+        color: #FFFFFF;
+        font-size: 28px;
+        font-weight: 800;
+        margin: 0 0 6px 0;
+    }
+    .page-header p {
+        color: #BBDEFB;
+        font-size: 14px;
+        margin: 0;
+        max-width: 520px;
+    }
+
+    /* KPI Cards */
+    [data-testid="stMetric"] {
+        background: #FFFFFF;
+        border: 1px solid #DBEAFE;
+        border-top: 4px solid #1560BD;
+        border-radius: 10px;
+        padding: 16px 20px !important;
+        box-shadow: 0 2px 8px rgba(21,96,189,0.07);
+    }
+    [data-testid="stMetricLabel"] { color: #4A5568 !important; font-size: 12px !important; }
+    [data-testid="stMetricValue"] { color: #0D3B8E !important; font-size: 28px !important; font-weight: 800 !important; }
+    [data-testid="stMetricDelta"] { font-size: 12px !important; }
+
+    /* Seção de Filtros */
+    .filter-section {
+        background: #FFFFFF;
+        border: 1px solid #DBEAFE;
+        border-radius: 10px;
+        padding: 20px 24px;
+        margin: 16px 0;
+    }
+    .filter-title {
+        color: #0D3B8E;
+        font-weight: 700;
+        font-size: 14px;
+        margin-bottom: 12px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+
+    /* Tabela */
+    .table-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 10px;
+    }
+    .table-title {
+        color: #0D3B8E;
+        font-size: 16px;
+        font-weight: 700;
+    }
+    .tag-count {
+        background: #EBF3FF;
+        color: #1560BD;
+        border-radius: 20px;
+        padding: 3px 12px;
+        font-size: 12px;
+        font-weight: 600;
+    }
+
+    /* Badge de status vazio */
+    .empty-state {
+        background: #F7FAFF;
+        border: 1px dashed #93C5FD;
+        border-radius: 10px;
+        padding: 40px;
+        text-align: center;
+        color: #64748B;
+    }
+
+    /* Divider customizado */
+    .section-divider {
+        border: none;
+        border-top: 1px solid #E2E8F0;
+        margin: 20px 0;
+    }
+
+    /* Ficha Técnica */
+    .ficha-header {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 16px;
+    }
+    .ficha-badge {
+        background: linear-gradient(135deg, #0D3B8E, #1560BD);
+        color: #FFFFFF;
+        border-radius: 6px;
+        padding: 4px 12px;
+        font-size: 13px;
+        font-weight: 700;
+        letter-spacing: 0.5px;
+    }
+    .ficha-title {
+        color: #0D3B8E;
+        font-size: 16px;
+        font-weight: 700;
+    }
+    .attr-label {
+        color: #64748B;
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.7px;
+        margin-bottom: 2px;
+    }
+    .attr-value {
+        color: #0D3B8E;
+        font-size: 20px;
+        font-weight: 800;
+    }
+    .attr-card {
+        background: #F7FAFF;
+        border: 1px solid #DBEAFE;
+        border-radius: 8px;
+        padding: 14px 18px;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+# ── Cabeçalho da Página ───────────────────────────────────────────────────────
+st.markdown(
+    """
+    <div class="page-header">
+        <h1>Dashboard de Ativos</h1>
+        <p>
+            Consulte os equipamentos registrados no sistema e acesse a ficha técnica detalhada.
+        </p>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+st.markdown("<br>", unsafe_allow_html=True)
+
+# ── Carrega os dados ──────────────────────────────────────────────────────────
+# lista_full é a fonte de verdade imutável para esta renderização.
+# Todos os filtros subsequentes operarão sobre lista_filtered (cópia),
+# preservando os valores originais para os KPIs e para a ficha técnica.
+lista_full: list[dict] = get_equipamentos()
+
+# ── KPIs ─────────────────────────────────────────────────────────────────────
+total_ativos = len(lista_full)
+
+# set() elimina duplicatas; sorted() para ordenação estável nas opções de filtro.
+fabricantes_set = set(eq["Fabricante"] for eq in lista_full)
+total_fab       = len(fabricantes_set)
+
+pot_media = (
+    sum(eq["Potência (kW)"] for eq in lista_full) / total_ativos
+    if total_ativos > 0 else 0.0
+)
+pot_max = (
+    max(eq["Potência (kW)"] for eq in lista_full)
+    if total_ativos > 0 else 0.0
+)
+
+# Tensão mais comum: dict de frequências + max por valor
+if total_ativos > 0:
+    freq_tensao: dict = {}
+    for eq in lista_full:
+        v = eq["Tensão (V)"]
+        freq_tensao[v] = freq_tensao.get(v, 0) + 1
+    tensao_mais_comum = max(freq_tensao, key=lambda k: freq_tensao[k])
+else:
+    tensao_mais_comum = "—"
+
+# ── Contagem por planta (Sprint 2) ────────────────────────────────────────────
+# Agrupa ativos por planta usando Counter emulado com dict nativo.
+contagem_planta: dict[str, int] = {}
+for eq in lista_full:
+    planta_eq = eq.get("planta", "Sem Planta")
+    contagem_planta[planta_eq] = contagem_planta.get(planta_eq, 0) + 1
+
+# Plantas ordenadas para exibição estável.
+plantas_ordenadas = sorted(contagem_planta.keys())
+
+# ── Linha 1 de KPIs — totais globais ─────────────────────────────────────────
+section_header("Inventário Geral", subtitle=f"{total_ativos} ativo(s) cadastrado(s)")
+col_k1, col_k2, col_k3, col_k4, col_k5 = st.columns(5)
+
+with col_k1:
+    kpi_card(
+        "⚙️ Total de Ativos",
+        str(total_ativos),
+        accent=PALETTE.brand_primary,
+        hint="equipamentos cadastrados",
+    )
+with col_k2:
+    kpi_card(
+        "🏭 Fabricantes",
+        str(total_fab),
+        accent=PALETTE.info,
+        hint="fabricantes distintos",
+    )
+with col_k3:
+    kpi_card(
+        "⚡ Potência Média",
+        f"{pot_media:.1f} kW",
+        accent=PALETTE.alert,
+        hint=f"máx: {pot_max:.0f} kW",
+    )
+with col_k4:
+    kpi_card(
+        "🔋 Maior Potência",
+        f"{pot_max:.0f} kW",
+        accent=PALETTE.brand_secondary,
+    )
+with col_k5:
+    kpi_card(
+        "🔌 Tensão Comum",
+        f"{tensao_mais_comum} V",
+        accent=PALETTE.safe,
+        hint="tensão mais frequente",
+    )
+
+# ── Linha 2 de KPIs — ativos por planta (Sprint 2) ───────────────────────────
+if plantas_ordenadas:
+    section_header("📍 Distribuição por Planta", accent=PALETTE.brand_accent)
+    cols_planta = st.columns(len(plantas_ordenadas))
+    for col_p, nome_planta in zip(cols_planta, plantas_ordenadas):
+        # Determina saúde agregada da planta: Crítico se qualquer ativo for crítico,
+        # Alerta se nenhum crítico mas algum em alerta, Saudável caso contrário.
+        ativos_planta = [eq for eq in lista_full if eq.get("planta") == nome_planta]
+        saudes_planta = []
+        for eq_p in ativos_planta:
+            hist_p = obter_telemetria_historica(eq_p["TAG"], num_leituras=20)
+            if hist_p:
+                ul = hist_p[-1]
+                saudes_planta.append(avaliar_saude(ul["temperatura"], ul["vibracao"]))
+        if any("Crítico" in s for s in saudes_planta):
+            accent_planta = PALETTE.critical
+        elif any("Alerta" in s for s in saudes_planta):
+            accent_planta = PALETTE.alert
+        else:
+            accent_planta = PALETTE.safe
+        with col_p:
+            kpi_card(
+                f"🏗️ {nome_planta}",
+                str(contagem_planta[nome_planta]),
+                accent=accent_planta,
+                hint="ativo(s)",
+            )
+
+st.markdown("<hr class='section-divider'>", unsafe_allow_html=True)
+
+# ── Filtros Interativos ───────────────────────────────────────────────────────
+st.markdown(
+    "<div class='filter-title'>🔍 &nbsp; Filtros do Inventário</div>",
+    unsafe_allow_html=True,
+)
+
+col_f0, col_f1, col_f2, col_f3 = st.columns([2, 2, 2, 1])
+
+with col_f0:
+    # Filtro de planta (Sprint 2) — selectbox: escolha única ou 'Todas'.
+    opcoes_planta = ["Todas"] + plantas_ordenadas
+    planta_sel = st.selectbox(
+        label="📍 Planta",
+        options=opcoes_planta,
+        index=0,
+        help="Filtre os equipamentos por unidade/área de operação.",
+        key="selectbox_planta",
+    )
+
+with col_f1:
+    fabricantes_disponiveis = sorted(fabricantes_set) if total_ativos > 0 else []
+    fabricante_sel = st.multiselect(
+        label="Fabricante",
+        options=fabricantes_disponiveis,
+        placeholder="Todos os fabricantes…",
+        help="Selecione um ou mais fabricantes para filtrar.",
+    )
+
+with col_f2:
+    if total_ativos > 0:
+        pot_min_val = float(min(eq["Potência (kW)"] for eq in lista_full))
+        pot_max_val = float(max(eq["Potência (kW)"] for eq in lista_full))
+        if pot_min_val == pot_max_val:
+            pot_max_val = pot_min_val + 1.0
+        faixa_potencia = st.slider(
+            label="Faixa de Potência (kW)",
+            min_value=pot_min_val,
+            max_value=pot_max_val,
+            value=(pot_min_val, pot_max_val),
+            step=0.5,
+            help="Arraste para filtrar por faixa de potência nominal.",
+        )
+    else:
+        faixa_potencia = (0.0, 0.0)
+        st.slider("Faixa de Potência (kW)", 0.0, 1.0, (0.0, 1.0), disabled=True)
+
+with col_f3:
+    busca_tag = st.text_input(
+        label="Buscar por TAG",
+        placeholder="Ex: EQ-001",
+        help="Filtragem parcial — case-insensitive.",
+    )
+
+# ── Aplicação dos Filtros ─────────────────────────────────────────────────────
+# Ordem: planta → fabricante → potência → TAG.
+# Planta primeiro por ser o filtro mais amplo e seletivo da Sprint 2.
+lista_filtered: list[dict] = list(lista_full)
+
+# Filtro de planta (Sprint 2).
+if planta_sel != "Todas":
+    lista_filtered = [
+        eq for eq in lista_filtered if eq.get("planta") == planta_sel
+    ]
+
+if fabricante_sel:
+    lista_filtered = [eq for eq in lista_filtered if eq["Fabricante"] in fabricante_sel]
+
+if total_ativos > 0:
+    lista_filtered = [
+        eq for eq in lista_filtered
+        if faixa_potencia[0] <= eq["Potência (kW)"] <= faixa_potencia[1]
+    ]
+
+if busca_tag.strip():
+    termo = busca_tag.strip().lower()
+    lista_filtered = [eq for eq in lista_filtered if termo in eq["TAG"].lower()]
+
+st.markdown("<hr class='section-divider'>", unsafe_allow_html=True)
+
+# ── Tabela de Inventário ──────────────────────────────────────────────────────
+col_th1, col_th2 = st.columns([6, 1])
+with col_th1:
+    st.markdown("<div class='table-title'>📋 Inventário de Equipamentos</div>", unsafe_allow_html=True)
+with col_th2:
+    st.markdown(
+        f"<div class='tag-count' style='text-align:right'>{len(lista_filtered)} registro(s)</div>",
+        unsafe_allow_html=True,
+    )
+
+if not lista_filtered:
+    st.markdown(
+        """
+        <div class="empty-state">
+            <div style="font-size:36px">🔍</div>
+            <div style="font-weight:600; margin-top:8px">Nenhum ativo encontrado</div>
+            <div style="font-size:13px; margin-top:4px">
+                Ajuste os filtros acima ou cadastre novos equipamentos.
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+else:
+    # ── Calcula o status de saúde de cada ativo (Sprint 2) ───────────────────
+    # Para cada TAG, obtém o último ponto da telemetria histórica e avalia
+    # a saúde via avaliar_saude(). Operação feita antes de lista_display
+    # para manter a geração de telemetria fora do dict comprehension.
+    saude_por_tag: dict[str, str] = {}
+    for eq in lista_filtered:
+        historico = obter_telemetria_historica(eq["TAG"], num_leituras=20)
+        ultimo    = historico[-1] if historico else {"temperatura": 0.0, "vibracao": 0.0}
+        saude_por_tag[eq["TAG"]] = avaliar_saude(
+            ultimo["temperatura"], ultimo["vibracao"]
+        )
+
+    # lista_display formata os valores para exibição visual.
+    # lista_filtered preserva os tipos originais para a ficha técnica abaixo.
+    lista_display = [
+        {
+            "TAG":           eq["TAG"],
+            "Modelo":        eq["Modelo"],
+            "Fabricante":    eq["Fabricante"],
+            "Planta":        eq.get("planta", "—"),
+            "Potência (kW)": f"{eq['Potência (kW)']:.1f} kW",
+            "Tensão (V)":    f"{int(eq['Tensão (V)'])} V",
+            "Saúde":         saude_por_tag[eq["TAG"]],
+        }
+        for eq in lista_filtered
+    ]
+
+    # Tabela HTML pura — zero-pandas, compatível com qualquer versão do Streamlit.
+    def _saude_cor(saude: str) -> str:
+        if "Crítico" in saude:
+            return "#EF4444"
+        if "Alerta" in saude:
+            return "#F59E0B"
+        return "#34D399"
+
+    linhas_html = ""
+    for row in lista_display:
+        cor = _saude_cor(row["Saúde"])
+        linhas_html += (
+            f"<tr>"
+            f"<td><code style='background:#EEF2FF;padding:2px 7px;border-radius:5px;"
+            f"font-weight:700;color:#1560BD'>{row['TAG']}</code></td>"
+            f"<td>{row['Modelo']}</td>"
+            f"<td>{row['Fabricante']}</td>"
+            f"<td>{row['Planta']}</td>"
+            f"<td style='text-align:right'>{row['Potência (kW)']}</td>"
+            f"<td style='text-align:right'>{row['Tensão (V)']}</td>"
+            f"<td><span style='color:{cor};font-weight:700'>{row['Saúde']}</span></td>"
+            f"</tr>"
+        )
+
+    st.markdown(
+        f"""
+        <style>
+        .asset-table {{ width:100%; border-collapse:collapse; font-size:13px; }}
+        .asset-table th {{
+            background:#0D3B8E; color:#fff; padding:9px 12px;
+            text-align:left; font-size:11px; font-weight:700;
+            letter-spacing:.5px; text-transform:uppercase;
+        }}
+        .asset-table td {{ padding:9px 12px; border-bottom:1px solid #E2E8F0; vertical-align:middle; }}
+        .asset-table tr:hover td {{ background:#F0F4FF; }}
+        </style>
+        <table class="asset-table">
+          <thead>
+            <tr>
+              <th>TAG</th><th>Modelo</th><th>Fabricante</th><th>Planta</th>
+              <th style="text-align:right">Potência</th>
+              <th style="text-align:right">Tensão</th>
+              <th>Saúde</th>
+            </tr>
+          </thead>
+          <tbody>{linhas_html}</tbody>
+        </table>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    # ── Ações Rápidas — Navegação Cruzada (Sprint 2) ─────────────────────────
+    # Permite navegar diretamente para a página de Monitoramento com a TAG
+    # pré-selecionada, sem que o usuário precise procurá-la manualmente.
+    # A TAG escolhida é persistida em st.session_state['tag_navegacao'] e
+    # consumida pelo seletor de equipamentos de 3_📈_Monitoramento.py.
+    st.markdown("<hr class='section-divider'>", unsafe_allow_html=True)
+    st.markdown(
+        """
+        <div style="display:flex; align-items:center; gap:10px; margin-bottom:12px;">
+            <span style="background:linear-gradient(135deg,#0D3B8E,#1560BD);
+                         color:#fff; border-radius:6px; padding:3px 12px;
+                         font-size:12px; font-weight:700; letter-spacing:0.5px;">
+                ⚡ AÇÕES RÁPIDAS
+            </span>
+            <span style="color:#0D3B8E; font-size:15px; font-weight:700;">
+                Navegar para Monitoramento
+            </span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    tags_filtradas = [eq["TAG"] for eq in lista_filtered]
+    col_acao_sel, col_acao_btn = st.columns([3, 1])
+
+    with col_acao_sel:
+        tag_para_monitorar = st.selectbox(
+            label="Selecione a TAG para monitorar:",
+            options=tags_filtradas,
+            index=0,
+            key="selectbox_acoes_rapidas",
+            help="Escolha o equipamento que deseja inspecionar no painel de telemetria.",
+        )
+
+    with col_acao_btn:
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button(
+            "📊 Abrir Monitoramento",
+            key="btn_abrir_monitoramento",
+            width='stretch',
+            help="Abre a página de Monitoramento com este equipamento pré-selecionado.",
+            type="primary",
+        ):
+            # Persiste a TAG no estado global antes de trocar de página.
+            # O Streamlit mantém o session_state entre páginas dentro da
+            # mesma sessão, permitindo que a página de destino recupere
+            # o valor sem passar parâmetros via URL.
+            st.session_state["tag_navegacao"] = tag_para_monitorar
+            st.switch_page("pages/3_Monitoramento.py")
+
+    # ── Exportação rápida ────────────────────────────────────────────────────
+    # CSV gerado com stdlib csv — sem dependência de pandas.
+    # Sprint 2: inclui colunas Planta e Saúde no export.
+    st.markdown("<br>", unsafe_allow_html=True)
+    col_exp1, col_exp2 = st.columns([5, 1])
+    with col_exp2:
+        _csv_fields = ["TAG", "Modelo", "Fabricante", "Planta", "Potência (kW)", "Tensão (V)", "Saúde"]
+        # Monta linhas do CSV a partir de lista_display (já formatada) +
+        # extrai o valor de Saúde calculado em saude_por_tag.
+        _csv_rows = [
+            {
+                "TAG":           eq["TAG"],
+                "Modelo":        eq["Modelo"],
+                "Fabricante":    eq["Fabricante"],
+                "Planta":        eq.get("planta", "—"),
+                "Potência (kW)": eq["Potência (kW)"],
+                "Tensão (V)":    eq["Tensão (V)"],
+                "Saúde":         saude_por_tag[eq["TAG"]],
+            }
+            for eq in lista_filtered
+        ]
+        _buf = io.StringIO()
+        _writer = csv.DictWriter(_buf, fieldnames=_csv_fields)
+        _writer.writeheader()
+        _writer.writerows(_csv_rows)
+        csv_bytes = _buf.getvalue().encode("utf-8")
+
+        st.download_button(
+            label="⬇️ Exportar CSV",
+            data=csv_bytes,
+            file_name="inventario_ativos.csv",
+            mime="text/csv",
+            width='stretch',
+            help="Baixa o inventário filtrado como arquivo CSV.",
+        )
+
+    # ── Ficha Técnica Interativa ─────────────────────────────────────────────
+    st.markdown("<hr class='section-divider'>", unsafe_allow_html=True)
+
+    st.markdown(
+        """
+        <div class='ficha-header'>
+            <span class='ficha-badge'>🔎 CONSULTA RÁPIDA</span>
+            <span class='ficha-title'>Ficha Técnica do Equipamento</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    tags_disponiveis = [eq["TAG"] for eq in lista_filtered]
+    tag_selecionada = st.selectbox(
+        label="Selecione a TAG do equipamento para consultar a ficha técnica:",
+        options=tags_disponiveis,
+        index=0,
+        placeholder="Escolha uma TAG…",
+        help="Escolha a TAG para visualizar todos os atributos técnicos do equipamento.",
+        key="selectbox_ficha_tecnica",
+    )
+
+    if tag_selecionada:
+        # Localiza o registro original (com tipos numéricos preservados)
+        registro = next(eq for eq in lista_filtered if eq["TAG"] == tag_selecionada)
+
+        with st.expander(
+            f"📋 Ficha Técnica Completa — {tag_selecionada}",
+            expanded=True,
+        ):
+            # ── Linha 1: TAG + Modelo ────────────────────────────────────────
+            col_f1, col_f2 = st.columns([1, 3])
+
+            with col_f1:
+                st.markdown(
+                    f"""
+                    <div class='attr-card'>
+                        <div class='attr-label'>🏷️ TAG / Identificador</div>
+                        <div class='attr-value'>{registro['TAG']}</div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
+            with col_f2:
+                st.info(
+                    f"**Modelo:** {registro['Modelo']}\n\n"
+                    f"Equipamento identificado pela TAG **{registro['TAG']}**, "
+                    f"fabricado por **{registro['Fabricante']}**."
+                )
+
+            st.markdown("<br>", unsafe_allow_html=True)
+
+            # ── Linha 2: Fabricante | Potência | Tensão ──────────────────────
+            col_a1, col_a2, col_a3 = st.columns(3)
+
+            with col_a1:
+                st.markdown(
+                    f"""
+                    <div class='attr-card'>
+                        <div class='attr-label'>🏭 Fabricante</div>
+                        <div class='attr-value'>{registro['Fabricante']}</div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
+            with col_a2:
+                potencia_val = registro["Potência (kW)"]
+                # Limiar de 50 kW — vide comentário em mock_db.py
+                if potencia_val > 50:
+                    st.warning(
+                        f"**⚡ Potência Nominal:** `{potencia_val:.1f} kW`\n\n"
+                        "ℹ️ Equipamento de **alta potência** — requer atenção especial "
+                        "na instalação elétrica e gestão de demanda."
+                    )
+                else:
+                    st.markdown(
+                        f"""
+                        <div class='attr-card'>
+                            <div class='attr-label'>⚡ Potência Nominal</div>
+                            <div class='attr-value'>{potencia_val:.1f} kW</div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+
+            with col_a3:
+                tensao_val = int(registro["Tensão (V)"])
+                st.markdown(
+                    f"""
+                    <div class='attr-card'>
+                        <div class='attr-label'>🔌 Tensão de Operação</div>
+                        <div class='attr-value'>{tensao_val} V</div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
+            st.markdown("<br>", unsafe_allow_html=True)
+
+            # ── Métricas resumidas ───────────────────────────────────────────
+            st.caption("📊 Resumo quantitativo do ativo selecionado:")
+            col_m1, col_m2, col_m3 = st.columns(3)
+            col_m1.metric("Potência", f"{potencia_val:.1f} kW")
+            col_m2.metric("Tensão", f"{tensao_val} V")
+            col_m3.metric("Fabricante", registro["Fabricante"])
+
+# ── Rodapé ────────────────────────────────────────────────────────────────────
+st.markdown(
+    """
+    <div style="text-align:center; color:#A0AEC0; font-size:11px;
+                padding-top:16px; border-top:1px solid #E2E8F0; margin-top:24px;">
+        Gestão de Ativos · Challenge Sprint 1 / Sprint 2 · Dados simulados via mock_db
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
